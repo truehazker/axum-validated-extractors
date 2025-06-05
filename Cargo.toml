@@ -1,6 +1,6 @@
 [package]
 name = "axum-validated-extractors"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A collection of validated extractors for Axum that automatically validate the extracted data using the validator crate"
 license = "MIT"
