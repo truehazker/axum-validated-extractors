@@ -1,10 +1,10 @@
-use axum_validated_extractors::*;
 use axum::{
-    body::Body,
-    routing::{get, post},
     Router,
+    body::Body,
     http::StatusCode,
+    routing::{get, post},
 };
+use axum_validated_extractors::*;
 use serde::Deserialize;
 use tower::ServiceExt;
 use validator::Validate;
@@ -36,23 +36,17 @@ pub struct QueryInput {
 
 // Test handlers
 #[axum::debug_handler]
-pub async fn json_handler(
-    ValidatedJson(_input): ValidatedJson<JsonInput>,
-) -> &'static str {
+pub async fn json_handler(ValidatedJson(_input): ValidatedJson<JsonInput>) -> &'static str {
     "ok"
 }
 
 #[axum::debug_handler]
-pub async fn form_handler(
-    ValidatedForm(_input): ValidatedForm<FormInput>,
-) -> &'static str {
+pub async fn form_handler(ValidatedForm(_input): ValidatedForm<FormInput>) -> &'static str {
     "ok"
 }
 
 #[axum::debug_handler]
-pub async fn query_handler(
-    ValidatedQuery(_input): ValidatedQuery<QueryInput>,
-) -> &'static str {
+pub async fn query_handler(ValidatedQuery(_input): ValidatedQuery<QueryInput>) -> &'static str {
     "ok"
 }
 
@@ -169,4 +163,4 @@ async fn test_invalid_query() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-} 
+}

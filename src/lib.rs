@@ -339,7 +339,8 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Query(value) = axum::extract::Query::<T>::from_request_parts(parts, state).await?;
+        let axum::extract::Query(value) =
+            axum::extract::Query::<T>::from_request_parts(parts, state).await?;
         Ok(ValidatedQuery(validate_and_wrap(value)?))
     }
 }
@@ -356,7 +357,8 @@ where
         req: axum::http::Request<axum::body::Body>,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Query(value) = axum::extract::Query::<T>::from_request(req, state).await?;
+        let axum::extract::Query(value) =
+            axum::extract::Query::<T>::from_request(req, state).await?;
         Ok(ValidatedQuery(validate_and_wrap(value)?))
     }
 }
