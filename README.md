@@ -19,13 +19,13 @@ A collection of validated extractors for Axum that automatically validate the ex
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+Install the crate:
 
-```toml
-[dependencies]
-axum-validated-extractors = "0.1.0"
-validator = { version = "0.16", features = ["derive"] }
+```bash
+cargo add axum-validated-extractors validator
 ```
+
+> ⚠️ `validator` crate is required for validation schema creation.
 
 ## Usage
 
