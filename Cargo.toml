@@ -1,6 +1,6 @@
 [package]
 name = "axum-validated-extractors"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 description = "A collection of validated extractors for Axum that automatically validate the extracted data using the validator crate"
 license = "MIT"
@@ -19,11 +19,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 axum = { version = "0.8.4", features = ["macros"] }
 serde = { version = "1.0.219", features = ["derive"] }
-thiserror = "2.0.12"
+thiserror = "2.0.16"
 validator = { version = "0.20.0", features = ["derive"] }
 
 [dev-dependencies]
-tokio = { version = "1.45.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["rt", "macros"] }
 tower = { version = "0.5.2", features = ["util"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
