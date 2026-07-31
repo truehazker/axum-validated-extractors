@@ -33,7 +33,11 @@ jobs:
         rust: [stable, beta, nightly]
 
     steps:
+    # This job runs only local cargo commands, so the workflow token has no reason to
+    # stay in the git config where every later step could read it.
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -65,7 +69,10 @@ jobs:
     name: MSRV (1.88.0)
     runs-on: ubuntu-latest
     steps:
+    # Local cargo check only — no git auth needed after checkout.
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
     - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
       with:
         toolchain: 1.88.0
@@ -84,6 +91,8 @@ jobs:
       contents: read
       id-token: write
     steps:
+    # Unlike the jobs above, this one keeps the checkout credentials on purpose: the
+    # "tag is on main" step below runs `git fetch`, which needs them.
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0 # full history so the "tag is on main" check can resolve ancestry
