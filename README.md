@@ -201,7 +201,8 @@ To build the response yourself, take the extractor as a `Result`:
 use axum::{
     routing::post,
     Router,
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use axum_validated_extractors::{ValidatedJson, ValidationError};
 use serde::Deserialize;
@@ -217,17 +218,23 @@ struct CreateUser {
 
 async fn create_user(
     user: Result<ValidatedJson<CreateUser>, ValidationError>,
-) -> impl IntoResponse {
+) -> Response {
     match user {
-        Ok(ValidatedJson(user)) => format!("created {}", user.username),
-        Err(ValidationError::ValidationError(errors)) => format!("invalid: {errors}"),
-        Err(other) => format!("bad request: {other}"),
+        Ok(ValidatedJson(user)) => format!("created {}", user.username).into_response(),
+        Err(ValidationError::ValidationError(errors)) => {
+            (StatusCode::UNPROCESSABLE_ENTITY, format!("invalid: {errors}")).into_response()
+        }
+        // Anything else is an extraction failure; keep the status axum chose for it.
+        Err(other) => other.into_response(),
     }
 }
 
 let app: Router<()> = Router::new()
     .route("/users", post(create_user));
 ```
+
+> ⚠️ Every arm must produce a `Response`. Returning a bare `String` from each arm compiles,
+> but `String` responds `200 OK`, so your failures would be reported as successes.
 
 ## Contributing
 

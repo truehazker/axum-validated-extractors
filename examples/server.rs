@@ -17,7 +17,8 @@
 use axum::{
     Router,
     extract::{Path, Query},
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use axum_validated_extractors::{
@@ -76,22 +77,24 @@ async fn search(ValidatedQuery(params): ValidatedQuery<Search>) -> String {
 
 /// Taking the extractor as a `Result` hands you the error instead of letting the
 /// crate's `IntoResponse` build the response.
+///
+/// Every arm returns a `Response`: a bare `String` would compile but respond `200 OK`,
+/// reporting the failures as successes.
 async fn create_user_custom_errors(
     user: Result<ValidatedJson<CreateUser>, ValidationError>,
-) -> impl IntoResponse {
+) -> Response {
     match user {
-        Ok(ValidatedJson(user)) => (
-            axum::http::StatusCode::CREATED,
-            format!("ok {}", user.username),
-        ),
+        Ok(ValidatedJson(user)) => {
+            (StatusCode::CREATED, format!("ok {}", user.username)).into_response()
+        }
         Err(ValidationError::ValidationError(errors)) => (
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::UNPROCESSABLE_ENTITY,
             format!("{} invalid field(s)", errors.field_errors().len()),
-        ),
-        Err(other) => (
-            axum::http::StatusCode::BAD_REQUEST,
-            format!("malformed: {other}"),
-        ),
+        )
+            .into_response(),
+        // Extraction failed, so keep the status Axum chose (415, 422, 413, ...) rather
+        // than flattening it to 400.
+        Err(other) => other.into_response(),
     }
 }
 

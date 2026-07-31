@@ -49,7 +49,7 @@
 //! yourself instead:
 //!
 //! ```rust
-//! use axum::response::IntoResponse;
+//! use axum::{http::StatusCode, response::{IntoResponse, Response}};
 //! use axum_validated_extractors::{ValidatedJson, ValidationError};
 //! # use serde::Deserialize;
 //! # use validator::Validate;
@@ -61,14 +61,20 @@
 //!
 //! async fn create_user(
 //!     user: Result<ValidatedJson<CreateUser>, ValidationError>,
-//! ) -> impl IntoResponse {
+//! ) -> Response {
 //!     match user {
-//!         Ok(ValidatedJson(user)) => format!("created {}", user.username),
-//!         Err(ValidationError::ValidationError(errors)) => format!("invalid: {errors}"),
-//!         Err(other) => format!("bad request: {other}"),
+//!         Ok(ValidatedJson(user)) => format!("created {}", user.username).into_response(),
+//!         Err(ValidationError::ValidationError(errors)) => {
+//!             (StatusCode::UNPROCESSABLE_ENTITY, format!("invalid: {errors}")).into_response()
+//!         }
+//!         // Anything else is an extraction failure; keep the status Axum chose for it.
+//!         Err(other) => other.into_response(),
 //!     }
 //! }
 //! ```
+//!
+//! Every arm must produce a [`Response`]. Returning a bare `String` from each arm compiles,
+//! but `String` responds `200 OK`, so the failures would be reported as successes.
 
 use axum::{
     extract::{rejection::FormRejection, rejection::JsonRejection, rejection::QueryRejection},

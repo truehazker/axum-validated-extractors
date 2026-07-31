@@ -387,3 +387,55 @@ async fn valid_works_with_a_user_defined_extractor() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body.contains("Input validation error"), "{body}");
 }
+
+/// Mirrors the `Result<Extractor, ValidationError>` pattern shown in the crate docs,
+/// the README and `examples/server.rs`. Each arm must yield the right status: returning
+/// a bare `String` from every arm compiles but responds `200 OK`, silently turning
+/// failures into successes.
+#[axum::debug_handler]
+async fn custom_error_handler(
+    input: Result<ValidatedJson<JsonInput>, ValidationError>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match input {
+        Ok(ValidatedJson(input)) => (StatusCode::CREATED, input.name).into_response(),
+        Err(ValidationError::ValidationError(errors)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{} invalid field(s)", errors.field_errors().len()),
+        )
+            .into_response(),
+        // Extraction failed, so keep the status Axum chose for it.
+        Err(other) => other.into_response(),
+    }
+}
+
+#[tokio::test]
+async fn documented_result_pattern_keeps_each_status() {
+    let no_content_type = Request::builder()
+        .uri("/")
+        .method("POST")
+        .body(Body::from(r#"{"name":"test","email":"test@example.com"}"#))
+        .unwrap();
+
+    let cases = [
+        (
+            json_req("/", r#"{"name":"test","email":"test@example.com"}"#),
+            StatusCode::CREATED,
+        ),
+        (
+            json_req("/", r#"{"name":"a","email":"nope"}"#),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        // Deserialization failures keep the rejection's own status, not a blanket 400.
+        (no_content_type, StatusCode::UNSUPPORTED_MEDIA_TYPE),
+        (json_req("/", "{not json"), StatusCode::BAD_REQUEST),
+    ];
+
+    for (req, expected) in cases {
+        let app = Router::new().route("/", post(custom_error_handler));
+        let (status, body) = call(app, req).await;
+        assert_eq!(status, expected, "{body}");
+        // Never report a failure as a success.
+        assert!(status != StatusCode::OK, "{body}");
+    }
+}
