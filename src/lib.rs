@@ -8,6 +8,7 @@
 //! - `ValidatedForm`: Validates URL-encoded form data
 //! - `ValidatedJson`: Validates JSON data
 //! - `ValidatedQuery`: Validates query parameters
+//! - `Valid`: Validates whatever extractor you wrap, including `Path`
 //! - Automatic validation using the `validator` crate
 //! - Type-safe error handling
 //!
@@ -36,7 +37,9 @@
 //!     .route("/users", post(create_user));
 //! ```
 //!
-//! `ValidatedForm` and `ValidatedQuery` are used the same way.
+//! `ValidatedForm` and `ValidatedQuery` are used the same way. [`Valid`] is generic over
+//! the extractor it wraps, so it also covers [`axum::extract::Path`] and your own
+//! extractors via [`HasValidate`].
 //!
 //! # Error Handling
 //!
@@ -187,5 +190,154 @@ where
         let axum::extract::Query(value) =
             axum::extract::Query::<T>::from_request_parts(parts, state).await?;
         Ok(ValidatedQuery(validate_and_wrap(value)?))
+    }
+}
+
+/// Bridges an extractor to the value inside it that [`Valid`] should validate.
+///
+/// Implemented for [`axum::extract::Json`], [`axum::extract::Form`],
+/// [`axum::extract::Query`] and [`axum::extract::Path`]. Implement it for your own
+/// extractor to make it work with [`Valid`]:
+///
+/// ```rust
+/// use axum_validated_extractors::HasValidate;
+/// use validator::Validate;
+///
+/// struct MyExtractor<T>(T);
+///
+/// impl<T: Validate> HasValidate for MyExtractor<T> {
+///     type Data = T;
+///     fn get_validate(&self) -> &T {
+///         &self.0
+///     }
+/// }
+/// ```
+pub trait HasValidate {
+    /// The value that carries the validation rules.
+    type Data: Validate;
+
+    /// Borrows the value to validate.
+    fn get_validate(&self) -> &Self::Data;
+}
+
+impl<T: Validate> HasValidate for axum::extract::Json<T> {
+    type Data = T;
+    fn get_validate(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Validate> HasValidate for axum::extract::Form<T> {
+    type Data = T;
+    fn get_validate(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Validate> HasValidate for axum::extract::Query<T> {
+    type Data = T;
+    fn get_validate(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Validate> HasValidate for axum::extract::Path<T> {
+    type Data = T;
+    fn get_validate(&self) -> &T {
+        &self.0
+    }
+}
+
+/// Validating wrapper around any extractor implementing [`HasValidate`]
+///
+/// Where [`ValidatedJson`] and friends are fixed to one source, `Valid` composes over
+/// whichever extractor you put inside it — including [`axum::extract::Path`]:
+///
+/// ```rust
+/// use axum::{extract::{Path, Query}, routing::get, Router};
+/// use axum_validated_extractors::Valid;
+/// use serde::Deserialize;
+/// use validator::Validate;
+///
+/// #[derive(Deserialize, Validate)]
+/// struct UserPath {
+///     #[validate(range(min = 1))]
+///     id: u64,
+/// }
+///
+/// #[derive(Deserialize, Validate)]
+/// struct Page {
+///     #[validate(range(min = 1))]
+///     page: u32,
+/// }
+///
+/// async fn get_user(Valid(Path(user)): Valid<Path<UserPath>>, Valid(Query(p)): Valid<Query<Page>>) {
+///     println!("user {} page {}", user.id, p.page);
+/// }
+///
+/// let app: Router<()> = Router::new().route("/users/{id}", get(get_user));
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Valid<E>(pub E);
+
+/// Rejection for [`Valid`]: either the inner extractor rejected the request, or the value
+/// it produced failed validation.
+#[derive(Debug, Error)]
+pub enum ValidRejection<R> {
+    /// The value was extracted but failed `Validate::validate`.
+    #[error(transparent)]
+    Invalid(#[from] validator::ValidationErrors),
+
+    /// The inner extractor rejected the request.
+    #[error(transparent)]
+    Inner(R),
+}
+
+impl<R: IntoResponse> IntoResponse for ValidRejection<R> {
+    fn into_response(self) -> Response {
+        match self {
+            // Same body as the fixed wrappers produce.
+            ValidRejection::Invalid(errors) => ValidationError::from(errors).into_response(),
+            // The inner extractor picked its own status; keep it.
+            ValidRejection::Inner(rejection) => rejection.into_response(),
+        }
+    }
+}
+
+impl<E, S> axum::extract::FromRequest<S> for Valid<E>
+where
+    E: axum::extract::FromRequest<S> + HasValidate,
+    S: Send + Sync,
+{
+    type Rejection = ValidRejection<E::Rejection>;
+
+    async fn from_request(
+        req: axum::http::Request<axum::body::Body>,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let inner = E::from_request(req, state)
+            .await
+            .map_err(ValidRejection::Inner)?;
+        inner.get_validate().validate()?;
+        Ok(Valid(inner))
+    }
+}
+
+impl<E, S> axum::extract::FromRequestParts<S> for Valid<E>
+where
+    E: axum::extract::FromRequestParts<S> + HasValidate,
+    S: Send + Sync,
+{
+    type Rejection = ValidRejection<E::Rejection>;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let inner = E::from_request_parts(parts, state)
+            .await
+            .map_err(ValidRejection::Inner)?;
+        inner.get_validate().validate()?;
+        Ok(Valid(inner))
     }
 }

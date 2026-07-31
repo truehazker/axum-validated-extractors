@@ -166,9 +166,11 @@ async fn test_invalid_query() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Response bodies and the status Axum's own rejections carry.
+// Behaviour the original suite did not cover: response bodies, the status Axum's
+// own rejections carry, and the `Valid` wrapper.
 // ─────────────────────────────────────────────────────────────────────────────
 
+use axum::extract::{Form, Json, Path, Query};
 use axum::http::Request;
 
 async fn call(app: Router, req: Request<Body>) -> (StatusCode, String) {
@@ -186,6 +188,14 @@ fn json_req(uri: &'static str, body: &'static str) -> Request<Body> {
         .method("POST")
         .header("content-type", "application/json")
         .body(Body::from(body))
+        .unwrap()
+}
+
+fn get_req(uri: &'static str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .method("GET")
+        .body(Body::empty())
         .unwrap()
 }
 
@@ -251,4 +261,129 @@ async fn query_composes_ahead_of_a_body_extractor() {
 
     let (status, body) = call(app, req).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+// ─── Valid<E> ───
+
+#[derive(Debug, Deserialize, Validate, Clone)]
+pub struct IdPath {
+    #[validate(range(min = 1))]
+    pub id: u64,
+}
+
+#[axum::debug_handler]
+async fn valid_json(Valid(Json(input)): Valid<Json<JsonInput>>) -> String {
+    input.name
+}
+
+#[axum::debug_handler]
+async fn valid_form(Valid(Form(input)): Valid<Form<FormInput>>) -> String {
+    input.name
+}
+
+#[axum::debug_handler]
+async fn valid_path_and_query(
+    Valid(Path(path)): Valid<Path<IdPath>>,
+    Valid(Query(q)): Valid<Query<QueryInput>>,
+) -> String {
+    format!("{} {}", path.id, q.name)
+}
+
+fn valid_app() -> Router {
+    Router::new()
+        .route("/json", post(valid_json))
+        .route("/form", post(valid_form))
+        .route("/{id}", get(valid_path_and_query))
+}
+
+#[tokio::test]
+async fn valid_wraps_body_extractors() {
+    let ok = json_req("/json", r#"{"name":"test","email":"test@example.com"}"#);
+    let (status, body) = call(valid_app(), ok).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, "test");
+
+    let bad = json_req("/json", r#"{"name":"a","email":"nope"}"#);
+    let (status, body) = call(valid_app(), bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("Input validation error"), "{body}");
+
+    // The inner extractor's own status survives the wrapper.
+    let wrong_shape = json_req("/json", r#"{"name":"test"}"#);
+    let (status, _) = call(valid_app(), wrong_shape).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let form = Request::builder()
+        .uri("/form")
+        .method("POST")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("name=test&email=test@example.com"))
+        .unwrap();
+    let (status, body) = call(valid_app(), form).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// Path params are reachable only through `Valid` — the fixed wrappers cannot do this.
+#[tokio::test]
+async fn valid_validates_path_params() {
+    let (status, body) = call(valid_app(), get_req("/7?name=test&email=test@example.com")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, "7 test");
+
+    // id = 0 violates range(min = 1).
+    let (status, body) = call(valid_app(), get_req("/0?name=test&email=test@example.com")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("Input validation error"), "{body}");
+    assert!(body.contains("id"), "{body}");
+
+    // A non-validation path failure keeps Axum's rejection instead.
+    let (status, body) = call(
+        valid_app(),
+        get_req("/abc?name=test&email=test@example.com"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.contains("Input validation error"), "{body}");
+}
+
+/// `HasValidate` is the documented extension point, so an extractor defined outside this
+/// crate must be able to opt in.
+#[tokio::test]
+async fn valid_works_with_a_user_defined_extractor() {
+    struct Wrapper<T>(T);
+
+    impl<T: Validate> HasValidate for Wrapper<T> {
+        type Data = T;
+        fn get_validate(&self) -> &T {
+            &self.0
+        }
+    }
+
+    impl<T, S> axum::extract::FromRequest<S> for Wrapper<T>
+    where
+        Json<T>: axum::extract::FromRequest<S>,
+        S: Send + Sync,
+    {
+        type Rejection = <Json<T> as axum::extract::FromRequest<S>>::Rejection;
+
+        async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+            let Json(value) = Json::<T>::from_request(req, state).await?;
+            Ok(Wrapper(value))
+        }
+    }
+
+    async fn handler(Valid(Wrapper(input)): Valid<Wrapper<JsonInput>>) -> String {
+        input.name
+    }
+
+    let app = Router::new().route("/", post(handler));
+    let ok = json_req("/", r#"{"name":"test","email":"test@example.com"}"#);
+    let (status, body) = call(app.clone(), ok).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, "test");
+
+    let bad = json_req("/", r#"{"name":"a","email":"nope"}"#);
+    let (status, body) = call(app, bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("Input validation error"), "{body}");
 }
