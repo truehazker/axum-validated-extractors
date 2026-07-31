@@ -164,3 +164,91 @@ async fn test_invalid_query() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Response bodies and the status Axum's own rejections carry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+use axum::http::Request;
+
+async fn call(app: Router, req: Request<Body>) -> (StatusCode, String) {
+    let response = app.oneshot(req).await.unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+fn json_req(uri: &'static str, body: &'static str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// The validation message is flattened onto one line and names every failing field.
+#[tokio::test]
+async fn validation_error_body_is_single_line() {
+    let app = Router::new().route("/", post(json_handler));
+    let (status, body) = call(app, json_req("/", r#"{"name":"a","email":"nope"}"#)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.starts_with("Input validation error: ["), "{body}");
+    assert!(body.contains("name") && body.contains("email"), "{body}");
+    assert!(!body.contains('\n'), "{body}");
+}
+
+/// Deserialization never reached validation, so each rejection keeps the status Axum
+/// chose for it rather than being flattened to 400.
+#[tokio::test]
+async fn deserialization_failures_keep_the_axum_rejection_status() {
+    let no_content_type = Request::builder()
+        .uri("/")
+        .method("POST")
+        .body(Body::from(r#"{"name":"test","email":"test@example.com"}"#))
+        .unwrap();
+
+    let cases = [
+        (json_req("/", "{not json"), StatusCode::BAD_REQUEST),
+        // Syntactically valid JSON, wrong shape.
+        (
+            json_req("/", r#"{"name":"test"}"#),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (no_content_type, StatusCode::UNSUPPORTED_MEDIA_TYPE),
+    ];
+
+    for (req, expected) in cases {
+        let app = Router::new().route("/", post(json_handler));
+        let (status, body) = call(app, req).await;
+        assert_eq!(status, expected, "{body}");
+        // A rejection is not a validation error, so it must not be dressed up as one.
+        assert!(!body.contains("Input validation error"), "{body}");
+        assert!(!body.is_empty());
+    }
+}
+
+/// `ValidatedQuery` has only a `FromRequestParts` impl; Axum's blanket impl must cover
+/// the `FromRequest` position. This fails to compile if that is not true.
+#[axum::debug_handler]
+async fn query_then_body_handler(
+    ValidatedQuery(_): ValidatedQuery<QueryInput>,
+    ValidatedJson(_): ValidatedJson<JsonInput>,
+) -> &'static str {
+    "ok"
+}
+
+#[tokio::test]
+async fn query_composes_ahead_of_a_body_extractor() {
+    let app = Router::new().route("/", post(query_then_body_handler));
+    let req = json_req(
+        "/?name=test&email=test@example.com",
+        r#"{"name":"test","email":"test@example.com"}"#,
+    );
+
+    let (status, body) = call(app, req).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}

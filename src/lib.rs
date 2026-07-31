@@ -170,11 +170,14 @@ impl IntoResponse for ValidationError {
         match self {
             ValidationError::ValidationError(_) => {
                 let message = format!("Input validation error: [{self}]").replace('\n', ", ");
-                (StatusCode::BAD_REQUEST, message)
+                (StatusCode::BAD_REQUEST, message).into_response()
             }
-            _ => (StatusCode::BAD_REQUEST, self.to_string()),
+            // Axum's rejections already carry the right status (415 on a missing content
+            // type, 413 on an oversized body, ...) - do not flatten them all to 400.
+            ValidationError::FormRejection(rejection) => rejection.into_response(),
+            ValidationError::JsonRejection(rejection) => rejection.into_response(),
+            ValidationError::QueryRejection(rejection) => rejection.into_response(),
         }
-        .into_response()
     }
 }
 
@@ -327,6 +330,8 @@ where
     }
 }
 
+// Only `FromRequestParts` - Axum's blanket impl derives `FromRequest` from it, so a
+// hand-written one would be dead code.
 impl<T, S> axum::extract::FromRequestParts<S> for ValidatedQuery<T>
 where
     T: DeserializeOwned + Validate,
@@ -341,24 +346,6 @@ where
     ) -> Result<Self, Self::Rejection> {
         let axum::extract::Query(value) =
             axum::extract::Query::<T>::from_request_parts(parts, state).await?;
-        Ok(ValidatedQuery(validate_and_wrap(value)?))
-    }
-}
-
-impl<T, S> axum::extract::FromRequest<S> for ValidatedQuery<T>
-where
-    T: DeserializeOwned + Validate,
-    S: Send + Sync,
-    axum::extract::Query<T>: axum::extract::FromRequest<S, Rejection = QueryRejection>,
-{
-    type Rejection = ValidationError;
-
-    async fn from_request(
-        req: axum::http::Request<axum::body::Body>,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let axum::extract::Query(value) =
-            axum::extract::Query::<T>::from_request(req, state).await?;
         Ok(ValidatedQuery(validate_and_wrap(value)?))
     }
 }
