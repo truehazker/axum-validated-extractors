@@ -66,7 +66,10 @@ jobs:
       run: cargo doc --no-deps --all-features
 
   msrv:
-    name: MSRV (1.88.0)
+    # Deliberately version-free: this name is a required status check, so embedding the
+    # toolchain would silently break branch protection on every MSRV bump. The version
+    # lives in the toolchain step and in Cargo.toml's rust-version.
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
     # Local cargo check only — no git auth needed after checkout.
