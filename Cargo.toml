@@ -1,6 +1,6 @@
 [package]
 name = "axum-validated-extractors"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A collection of validated extractors for Axum that automatically validate the extracted data using the validator crate"
 license = "MIT"
@@ -10,18 +10,22 @@ readme = "README.md"
 keywords = ["axum", "validation", "extractors", "web", "http"]
 categories = ["web-programming::http-server", "web-programming::http-client"]
 authors = ["Egor Orlov <40111175+truehazker@users.noreply.github.com>"]
-rust-version = "1.87.0"
+rust-version = "1.88.0"
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+# Cargo unifies features, so these are effectively part of the public API: dropping a
+# feature here silently breaks downstream crates that declare the same dependency
+# without it. Kept as-is for that reason, even though the library itself uses no
+# derive macro of its own.
 [dependencies]
 axum = { version = "0.8.4", features = ["macros"] }
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.16"
-validator = { version = "0.20.0", features = ["derive"] }
+validator = { version = "0.21.0", features = ["derive"] }
 
 [dev-dependencies]
-tokio = { version = "1.47.1", features = ["rt", "macros"] }
+tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "net"] }
 tower = { version = "0.5.2", features = ["util"] }
